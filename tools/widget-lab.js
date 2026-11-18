@@ -73,7 +73,7 @@ const CREST_LABELS = {
 }
 
 function crestLabel(url) {
-  const match = String(url).match(/\/(\d+)\.(png|svg)/i)
+  const match = String(url).match(/(\d+)\.(png|svg)/i)
   return match ? (CREST_LABELS[match[1]] || match[1].slice(-3)) : '?'
 }
 
@@ -323,13 +323,17 @@ function findNodes() {
   return {
     nodes,
     texts,
-    score: texts.find(n => n.font && n.font.size === 17),
+    score: texts.find(n => /^(\d+\s-\s\d+|–)$/.test(n.text || '')),
     status: goldTexts.find(n => STATUS_RE.test(n.text)),
     form: texts.filter(n => n.font && n.font.size === 9 && ['W', 'D', 'L'].includes(n.text)),
     codes: texts.filter(n => n.font && n.font.size === 11 &&
       n.font.name === 'semiboldSystemFont' && n.textColor && n.textColor.hex === '#ffffff'),
     badges: nodes.filter(n => n.kind === 'image' && n.imageSize &&
       n.imageSize.width === 40 && n.imageSize.height === 40),
+    miniBadges: nodes.filter(n => n.kind === 'image' && n.imageSize &&
+      n.imageSize.width === 24 && n.imageSize.height === 24),
+    miniNames: texts.filter(n => n.font && n.font.size === 9 &&
+      n.font.name === 'semiboldSystemFont' && n.textColor && n.textColor.hex === '#ffffff'),
     hint: texts.find(n => HINTS.includes(n.text)),
     dates: nodes.filter(n => n.kind === 'date'),
     nextLabel: texts.find(n => n.text === 'NEXT'),
@@ -342,7 +346,8 @@ function assertInvariants() {
   const results = []
   const check = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail || '' })
   const found = findNodes()
-  const { score, status, form, codes, badges, hint, dates, nextLabel, lastLabel, opponent } = found
+  const { score, status, form, codes, badges, miniBadges, miniNames, hint,
+    dates, nextLabel, lastLabel, opponent } = found
   const imageRequests = recorded.filter(r => r.kind === 'image')
   const apiRequests = recorded.filter(r => r.kind === 'json').map(r => r.url)
   const countdown = dates.find(n => n.style === 'relative') ||
@@ -360,8 +365,10 @@ function assertInvariants() {
   check('refreshAfterDate is set', capturedWidget && capturedWidget.refreshAfterDate instanceof Date)
   check('last score is present', !!score && /^(\d+\s-\s\d+|–)$/.test(score.text), score && score.text)
   check('status is valid', !!status && STATUS_RE.test(status.text), status && status.text)
-  check('two 40x40 crests', badges.length === 2, `found ${badges.length}`)
-  check('two team codes', codes.length === 2, codes.map(n => n.text).join(', '))
+  check('two 40x40 crests in next row', badges.length === 2, `found ${badges.length}`)
+  check('two 24x24 crests in last row', miniBadges.length === 2, `found ${miniBadges.length}`)
+  check('two last-match team names', miniNames.length === 2, miniNames.map(n => n.text).join(', '))
+  check('two team codes in next row', codes.length === 2, codes.map(n => n.text).join(', '))
   check('five form squares', form.length === 5 && form.every(n => ['W', 'D', 'L'].includes(n.text)), form.map(n => n.text).join(''))
   check('data-state hint present', !!hint, hint && hint.text)
   check('NEXT row present', !!nextLabel && !!opponent, opponent && opponent.text)

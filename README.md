@@ -7,7 +7,7 @@ Built with plain JavaScript (ES6+) for iOS/iPadOS/macOS via Scriptable. No build
 ## Features
 
 - **Next match row** — both 40×40 crests, opponent code (`vs`/`at`), and an auto-updating `WidgetDate` relative countdown like "2 days, 6 hours".
-- **Last match row** — latest score and status (`67'`, `HT`, `FT`) beside five W/D/L form blocks in green/gray/red.
+- **Last match row** — compact 24pt crests with team codes, the latest score and status (`67'`, `HT`, `FT`), plus five W/D/L form blocks in green/gray/red.
 - **Dynamic home/away** — Real Madrid is placed on whichever side the API reports for both rows.
 - **Glass-style theme** — translucent `#1a1a1a` base, soft diagonal gradient, rounded panels and `#f1d382` gold accents. On iOS 26 the system supplies its own Liquid Glass in clear/tinted Home Screen modes; Scriptable cannot invoke that effect directly, so this is an approximation designed to stay legible over any wallpaper.
 - **Resilient** — fresh API data → cached match/next fixture → bundled sample data → clean "No fixture scheduled" state. Never a blank widget.
@@ -38,7 +38,7 @@ A zero-dependency Node harness runs the real `index.js` in a simulated Scriptabl
 
 ```sh
 export FOOTBALL_DATA_TOKEN=...        # football-data.org token; never logged
-node tools/widget-lab.js              # live data + 17 assertions + preview
+node tools/widget-lab.js              # live data + 19 assertions + preview
 node tools/widget-lab.js --json       # also print the rendered model
 node tools/widget-lab.js --no-key     # missing-token fallback (no token needed)
 node tools/widget-lab.js --api-error  # API failure fallback

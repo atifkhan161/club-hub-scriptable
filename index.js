@@ -457,6 +457,21 @@ function addCountdown(parent, kickoff) {
   countdown.textColor = COLOR_MUTED
 }
 
+function addMiniTeam(parent, team, crestImage) {
+  const item = parent.addStack()
+  item.layoutHorizontally()
+  item.centerAlignContent()
+  item.spacing = 3
+
+  const badge = item.addImage(crestImage || initialsImage(team ? team.code : '?'))
+  badge.imageSize = new Size(24, 24)
+  badge.resizable = true
+  badge.cornerRadius = 5
+
+  styledLabel(item, abbreviation(team), Font.semiboldSystemFont(9), Color.white())
+  return item
+}
+
 function addFormBlocks(parent, form) {
   const results = (form && form.length) ? form : ['D', 'D', 'D', 'D', 'D']
   for (let i = 0; i < results.length; i++) {
@@ -483,7 +498,7 @@ function refreshDateFor(model) {
   return new Date(Date.now() + delay)
 }
 
-function buildWidget(model, nextHomeImage, nextAwayImage) {
+function buildWidget(model, nextHomeImage, nextAwayImage, lastHomeImage, lastAwayImage) {
   const widget = new ListWidget()
   widget.backgroundColor = COLOR_BG
   widget.setPadding(15, 15, 15, 15)
@@ -552,27 +567,25 @@ function buildWidget(model, nextHomeImage, nextAwayImage) {
 
   widget.addSpacer(4)
 
-  // BOTTOM ROW — last result + form ---------------------------------------
-  const bottom = glassPanel(widget, 4, 9, 4, 9)
-  const last = bottom.addStack()
-  last.layoutVertically()
-  last.spacing = 1
-  styledLabel(last, 'LAST', Font.semiboldSystemFont(9), COLOR_GOLD)
-  const resultLine = last.addStack()
-  resultLine.layoutHorizontally()
-  resultLine.spacing = 5
-  const scoreText = styledLabel(resultLine, model.last ? model.last.score : '–',
-    Font.boldSystemFont(17), Color.white())
-  scoreText.minimumScaleFactor = 0.7
-  styledLabel(resultLine, model.last ? model.last.status : '',
-    Font.semiboldSystemFont(10), COLOR_GOLD)
+  // BOTTOM ROW — last result (both badges + names) + form ------------------
+  const bottom = glassPanel(widget, 4, 8, 4, 8)
+  styledLabel(bottom, 'LAST', Font.semiboldSystemFont(8), COLOR_GOLD)
+  if (model.last) {
+    addMiniTeam(bottom, model.last.home, lastHomeImage)
+    const scoreText = styledLabel(bottom, model.last.score,
+      Font.boldSystemFont(15), Color.white())
+    scoreText.minimumScaleFactor = 0.7
+    addMiniTeam(bottom, model.last.away, lastAwayImage)
+    styledLabel(bottom, model.last.status, Font.semiboldSystemFont(9), COLOR_GOLD)
+  } else {
+    styledLabel(bottom, 'No result', Font.regularSystemFont(10), Color.white())
+  }
 
   bottom.addSpacer(null)
   const formGroup = bottom.addStack()
   formGroup.layoutHorizontally()
   formGroup.centerAlignContent()
-  formGroup.spacing = 4
-  styledLabel(formGroup, 'FORM', Font.regularSystemFont(8), COLOR_MUTED)
+  formGroup.spacing = 3
   addFormBlocks(formGroup, model.form)
   return widget
 }
@@ -637,8 +650,10 @@ async function run() {
 
   const nextHomeImage = model.next ? await loadCrest(model.next.home) : null
   const nextAwayImage = model.next ? await loadCrest(model.next.away) : null
+  const lastHomeImage = model.last ? await loadCrest(model.last.home) : null
+  const lastAwayImage = model.last ? await loadCrest(model.last.away) : null
 
-  const widget = buildWidget(model, nextHomeImage, nextAwayImage)
+  const widget = buildWidget(model, nextHomeImage, nextAwayImage, lastHomeImage, lastAwayImage)
   Script.setWidget(widget)
 
   // Preview during development / when run manually in the app.
@@ -659,7 +674,7 @@ async function run() {
         status: 'Widget unavailable',
         hint: 'Check the Scriptable log',
         form: []
-      }, null, null))
+      }, null, null, null, null))
     } catch (inner) {
       console.error('Could not render fallback widget: ' + inner)
     }
