@@ -478,7 +478,11 @@ function renderNode(node) {
   }
   if (node.kind === 'image') {
     const s = node.imageSize || { width: 40, height: 40 }
-    return `<div style="width:${s.width}px;height:${s.height}px;flex:none;border-radius:${node.cornerRadius || 0}px;background:#2c2c30;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;">${esc(node.image && node.image.label ? node.image.label : '?')}</div>`
+    // Real crest URLs render as neutral placeholders; only the initials
+    // fallback (drawn with DrawContext) shows its letters in the preview.
+    const label = node.image && node.image.stub === 'initials'
+      ? esc(node.image.label || '?') : ''
+    return `<div style="width:${s.width}px;height:${s.height}px;flex:none;border-radius:${node.cornerRadius || 0}px;background:#2c2c30;display:flex;align-items:center;justify-content:center;color:#fff;font-size:${Math.round(s.width / 3)}px;font-weight:700;">${label}</div>`
   }
   return `<div>${children}</div>`
 }

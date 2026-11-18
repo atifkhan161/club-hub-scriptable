@@ -4,6 +4,10 @@ A dark-themed, medium-size [Scriptable](https://scriptable.app) home-screen widg
 
 Built with plain JavaScript (ES6+) for iOS/iPadOS/macOS via Scriptable. No build step, package manager, or dependencies.
 
+![Club Hub widget on iOS](docs/IMG_4748.jpg)
+
+*The medium widget running in Scriptable on iOS. Final appearance depends on the device and iOS 26 Home Screen appearance settings.*
+
 ## Features
 
 - **Next match row** — both 40×40 crests, opponent code (`vs`/`at`), and an auto-updating `WidgetDate` relative countdown like "2 days, 6 hours".
