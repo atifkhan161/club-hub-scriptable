@@ -56,8 +56,47 @@ The skill is derived from the complete official docs at
 
 ## Testing and deployment
 
+### Local pre-flight checks (Node, no dependencies)
+
+`tools/widget-lab.js` runs the real, unmodified `index.js` in a `node:vm`
+context with stubbed Scriptable APIs. It checks widget invariants, prints a
+widget tree, and writes an HTML approximation of the medium widget. Requires
+Node 18+ (uses built-in `fetch`); there are no packages to install.
+
+```sh
+export FOOTBALL_DATA_TOKEN=...          # football-data.org token; never logged
+node tools/widget-lab.js                # live API + assertions + preview
+node tools/widget-lab.js --json         # also print the rendered model
+node tools/widget-lab.js --no-key       # fallback: sample data + "Set API token"
+node tools/widget-lab.js --api-error    # fallback when API requests fail
+node tools/widget-lab.js --crest-fail   # fallback: 3-letter initials badges
+node tools/widget-lab.js --preview /tmp/preview.html
+node tools/widget-lab.js --help
+```
+
+Output goes to `.cache/widget-preview.html` (gitignored). To run the lab and
+open that file in your default browser automatically (macOS/Linux):
+
+```sh
+./tools/view-widget.sh              # live data
+./tools/view-widget.sh --no-key     # fallback state
+./tools/view-widget.sh --api-error  # failure state
+./tools/view-widget.sh --no-open    # generate only, don't open a browser
+```
+
+If no browser launcher is available, the script prints the file path instead.
+The HTML preview is an approximation, not a real iOS render.
+
+To see the **real** widget, run `index.js` inside the Scriptable app on macOS
+or iOS. `config.runsInApp` makes the script call `presentMedium()` automatically,
+so the medium widget preview appears immediately; final visual approval should
+always be done there.
+
+### Final validation and deployment
+
 - Develop and preview with the Scriptable app on macOS (`presentSmall()`,
-  `presentMedium()`, `presentLarge()`) for pixel-level debugging.
+  `presentMedium()`, `presentLarge()`) for pixel-level debugging. Compare the
+  result with the HTML preview, then release.
 - Deployment is manual: copy the `.js` script into the iCloud Drive Scriptable
   folder or paste it into Scriptable on iOS.
 
