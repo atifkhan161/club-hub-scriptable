@@ -42,7 +42,7 @@ A zero-dependency Node harness runs the real `index.js` in a simulated Scriptabl
 
 ```sh
 export FOOTBALL_DATA_TOKEN=...        # football-data.org token; never logged
-node tools/widget-lab.js              # live data + 19 assertions + preview
+node tools/widget-lab.js              # live data + 20 assertions + preview
 node tools/widget-lab.js --json       # also print the rendered model
 node tools/widget-lab.js --no-key     # missing-token fallback (no token needed)
 node tools/widget-lab.js --api-error  # API failure fallback

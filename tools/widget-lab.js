@@ -368,6 +368,8 @@ function assertInvariants() {
   check('two 40x40 crests in next row', badges.length === 2, `found ${badges.length}`)
   check('two 24x24 crests in last row', miniBadges.length === 2, `found ${miniBadges.length}`)
   check('two last-match team names', miniNames.length === 2, miniNames.map(n => n.text).join(', '))
+  check('last-match names cannot wrap',
+    miniNames.length === 2 && miniNames.every(n => n.lineLimit === 1))
   check('two team codes in next row', codes.length === 2, codes.map(n => n.text).join(', '))
   check('five form squares', form.length === 5 && form.every(n => ['W', 'D', 'L'].includes(n.text)), form.map(n => n.text).join(''))
   check('data-state hint present', !!hint, hint && hint.text)

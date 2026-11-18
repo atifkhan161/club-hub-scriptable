@@ -462,13 +462,19 @@ function addMiniTeam(parent, team, crestImage) {
   item.layoutHorizontally()
   item.centerAlignContent()
   item.spacing = 3
+  // Reserve enough width for badge + 3-letter code so SwiftUI cannot squeeze
+  // the label and wrap "RMA" into two lines on a crowded row.
+  item.size = new Size(48, 24)
 
   const badge = item.addImage(crestImage || initialsImage(team ? team.code : '?'))
   badge.imageSize = new Size(24, 24)
   badge.resizable = true
   badge.cornerRadius = 5
 
-  styledLabel(item, abbreviation(team), Font.semiboldSystemFont(9), Color.white())
+  const name = styledLabel(item, abbreviation(team),
+    Font.semiboldSystemFont(9), Color.white())
+  name.lineLimit = 1
+  name.minimumScaleFactor = 0.8
   return item
 }
 
