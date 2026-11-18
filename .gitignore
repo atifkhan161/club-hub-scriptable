@@ -1,0 +1,5 @@
+# Local test-lab output
+.cache/
+
+# macOS
+.DS_Store
