@@ -49,8 +49,13 @@ The skill is derived from the complete official docs at
 - Use flexible spacers (`addSpacer(null)`) for alignment inside stacks.
 - Cache downloaded crests with `FileManager` and constrain badge sizes (the PRD
   requires `40x40`) with `WidgetImage.imageSize`.
-- Follow the PRD's design tokens: `#1a1a1a` background, `#f1d382` gold accents,
-  form colors `#2ecc71` / `#95a5a6` / `#e74c3c`.
+- The medium widget has two rows: next fixture (`status=SCHEDULED&limit=1`) with
+  a `WidgetDate.applyRelativeStyle()` countdown, and last result plus form.
+  Keep cached payloads backward compatible — old files may lack `next`.
+- Follow the PRD's design tokens: translucent `#1a1a1a` background, `#f1d382`
+  gold accents, form colors `#2ecc71` / `#95a5a6` / `#e74c3c`. The "glass" look
+  is only approximated with translucent panels and a gradient; Scriptable has
+  no Liquid Glass API (iOS 26 applies it at the system level).
 - Be mindful of widget memory limits and OS-controlled refresh cadence; set
   `refreshAfterDate` for the earliest acceptable refresh.
 

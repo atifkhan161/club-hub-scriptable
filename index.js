@@ -1,25 +1,33 @@
-// Club Hub — Real Madrid matchday widget for Scriptable (V1)
+// Club Hub — Real Madrid matchday widget for Scriptable
 // ------------------------------------------------------------
 // SETUP
 //   1. Get a free API token from https://www.football-data.org/client/register
 //   2. Run this script in the Scriptable app and enter the token when prompted.
 //      The token is saved in the Scriptable Keychain, never in this file.
 //   3. Add a Scriptable widget to your Home Screen, size MEDIUM, and select
-//      this script. Set its parameter to anything you like (unused in V1).
+//      this script. The widget parameter is unused in V1.
 //
 // DEPLOYMENT
 //   Copy this file into your iCloud Drive/Scriptable folder, or paste it into
 //   a new script in the Scriptable app. No build step or modules are required.
 //
 // BEHAVIOUR
-//   Fetches the latest Real Madrid fixture and last 5 results on every widget
-//   refresh. Caches the normalized match + form to disk; if the API is
-//   unavailable it shows the last cached match, then bundled sample data.
-//   Crest images are cached for 24h; failures fall back to a 3-letter badge.
-//   Actual refresh timing is controlled by iOS. refreshAfterDate only sets
-//   the earliest allowed refresh (30 minutes here) to respect the free tier's
-//   10 calls/minute limit. NOTE: the free plan delivers DELAYED scores and
-//   usually no live minute; live minute display needs a livescores plan.
+//   Two-row medium widget:
+//     TOP    — next fixture: both crests, opponent, relative countdown
+//     BOTTOM — last result score + five-match W/D/L form
+//   Data is fetched from football-data.org on every widget refresh and cached
+//   to disk. If the API is unavailable the widget shows the last cached data,
+//   then bundled sample data. Crest images are cached for 24h; failures fall
+//   back to a 3-letter initials badge.
+//
+//   Actual refresh timing is controlled by iOS. refreshAfterDate only sets the
+//   earliest allowed refresh (30 minutes, or just after the next kickoff when
+//   it is sooner) to respect the free tier's 10 calls/minute limit. The free
+//   plan delivers delayed scores and usually no live minute.
+//
+//   The "glass" look is an approximation: translucent fills, a soft gradient
+//   and rounded panels. True Apple Liquid Glass is applied by iOS 26 itself
+//   (clear/tinted Home Screen modes) and cannot be invoked from Scriptable.
 //
 // Source docs: https://docs.scriptable.app/ — see the `scriptable` skill in
 // .opencode/skills/scriptable/ for the full API reference.
@@ -36,10 +44,13 @@ const MATCH_CACHE_FILE = 'match.json'
 const CACHE_TTL_MS = 30 * 60 * 1000                   // 30 minutes
 const CREST_TTL_MS = 24 * 60 * 60 * 1000              // 24 hours
 
-const COLOR_BG = new Color('#1a1a1a')
+// Translucent base so iOS 26's own glass/tint can show through.
+const COLOR_BG = new Color('#1a1a1a', 0.62)
+const COLOR_PANEL = new Color('#2c2c30', 0.42)
+const COLOR_SHEEN = new Color('#ffffff', 0.10)
 const COLOR_GOLD = new Color('#f1d382')
-const COLOR_MUTED = new Color('#8e8e93')
-const COLOR_CREST_BG = new Color('#2c2c30')
+const COLOR_MUTED = new Color('#b0b0b8')
+const COLOR_CREST_BG = new Color('#2c2c30', 0.85)
 const FORM_COLORS = {
   W: new Color('#2ecc71'),
   D: new Color('#95a5a6'),
@@ -73,14 +84,32 @@ const TEAM_CODES = {
   'levante': 'LEV'
 }
 
-// Normalized render model used when there is no API response and no cache.
-const SAMPLE_MODEL = {
-  home: { id: TEAM_ID, name: 'Real Madrid', code: 'RMA', logo: null, goals: 2 },
-  away: { id: 548, name: 'Barcelona', code: 'BAR', logo: null, goals: 1 },
-  score: '2 - 1',
-  status: 'FT',
-  isLive: false,
-  form: ['W', 'W', 'D', 'W', 'L']
+function team(id, name, code) {
+  return { id: id, name: name, code: code, logo: null, goals: null }
+}
+
+// Sample payload with a kickoff generated at runtime, used only when there is
+// neither a live response nor a cached match.
+function samplePayload() {
+  const kickoff = new Date(Date.now() + (3 * 24 + 5) * 60 * 60 * 1000).toISOString()
+  return {
+    model: {
+      home: team(TEAM_ID, 'Real Madrid', 'RMA'),
+      away: team(524, 'Barcelona', 'BAR'),
+      score: '2 - 1',
+      status: 'FT',
+      isLive: false
+    },
+    form: ['W', 'W', 'D', 'W', 'L'],
+    next: {
+      home: team(TEAM_ID, 'Real Madrid', 'RMA'),
+      away: team(524, 'Barcelona', 'BAR'),
+      opponent: team(524, 'Barcelona', 'BAR'),
+      isHome: true,
+      kickoff: kickoff,
+      label: 'SCHEDULED'
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -188,11 +217,9 @@ function mapStatus(match) {
   if (status === 'PAUSED') {
     return { label: 'HT', live: true }
   }
-  // All finished states collapse to FT per the PRD's status convention.
   if (status === 'FINISHED' || status === 'AWARDED') {
     return { label: 'FT', live: false }
   }
-  // Scheduled, timed, postponed, suspended, cancelled, etc.
   return { label: status || 'TBD', live: false }
 }
 
@@ -202,11 +229,11 @@ function readGoals(match) {
   return { home: fullTime.home, away: fullTime.away }
 }
 
-function abbreviation(team) {
-  if (!team) return '---'
-  const code = String(team.code || '').trim().toUpperCase()
+function abbreviation(teamObj) {
+  if (!teamObj) return '---'
+  const code = String(teamObj.code || '').trim().toUpperCase()
   if (code.length >= 2 && code.length <= 4) return code
-  let name = String(team.name || '').toLowerCase()
+  let name = String(teamObj.name || '').toLowerCase()
   if (typeof name.normalize === 'function') {
     name = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip accents
   }
@@ -225,12 +252,12 @@ function pngCrest(url) {
   return String(url).replace(/\.svg(?=\?|$)/i, '.png')
 }
 
-function teamModel(team, goals) {
+function teamModel(rawTeam, goals) {
   return {
-    id: team && team.id ? team.id : 0,
-    name: team && (team.shortName || team.name) ? (team.shortName || team.name) : '',
-    code: team && team.tla ? team.tla : null,
-    logo: pngCrest(team && team.crest),
+    id: rawTeam && rawTeam.id ? rawTeam.id : 0,
+    name: rawTeam && (rawTeam.shortName || rawTeam.name) ? (rawTeam.shortName || rawTeam.name) : '',
+    code: rawTeam && rawTeam.tla ? rawTeam.tla : null,
+    logo: pngCrest(rawTeam && rawTeam.crest),
     goals: goals !== undefined ? goals : null
   }
 }
@@ -252,6 +279,27 @@ function normalizeMatch(match) {
   }
 }
 
+function normalizeNextMatch(match) {
+  if (!match) return null
+  const isHome = !!(match.homeTeam && match.homeTeam.id === TEAM_ID)
+  const opponent = isHome ? match.awayTeam : match.homeTeam
+  let kickoff = null
+  if (match.utcDate) {
+    const date = new Date(match.utcDate)
+    if (!isNaN(date.getTime()) && date.getTime() > Date.now()) {
+      kickoff = date.toISOString()
+    }
+  }
+  return {
+    home: teamModel(match.homeTeam),
+    away: teamModel(match.awayTeam),
+    opponent: teamModel(opponent),
+    isHome: isHome,
+    kickoff: kickoff,
+    label: String(match.status || '').toUpperCase()
+  }
+}
+
 function deriveForm(matches, teamId) {
   const finished = (matches || []).filter(function (match) {
     return String(match.status || '').toUpperCase() === 'FINISHED'
@@ -265,7 +313,7 @@ function deriveForm(matches, teamId) {
     if (homeGoals === null || homeGoals === undefined ||
         awayGoals === null || awayGoals === undefined) return 'D'
 
-    const isHome = !!(match.homeTeam && match.homeTeam.id === teamId)
+    const isHome = !!(match.homeTeam && match.homeTeam.id === TEAM_ID)
     const mine = isHome ? homeGoals : awayGoals
     const theirs = isHome ? awayGoals : homeGoals
     if (mine > theirs) return 'W'
@@ -277,19 +325,35 @@ function deriveForm(matches, teamId) {
 async function fetchMatchData(apiKey) {
   const lastResult = await safeFetch('/teams/' + TEAM_ID + '/matches?status=FINISHED&limit=5', apiKey)
   const liveResult = await safeFetch('/teams/' + TEAM_ID + '/matches?status=LIVE&limit=1', apiKey)
+  const nextResult = await safeFetch('/teams/' + TEAM_ID + '/matches?status=SCHEDULED&limit=1', apiKey)
 
   const finishedMatches = (lastResult.json && lastResult.json.matches) || []
   const liveMatches = (liveResult.json && liveResult.json.matches) || []
+  const scheduledMatches = (nextResult.json && nextResult.json.matches) || []
   const form = finishedMatches.length ? deriveForm(finishedMatches, TEAM_ID) : []
 
   const chosen = liveMatches[0] || finishedMatches[0] || null
   const model = chosen ? normalizeMatch(chosen) : null
-  if (model) saveCachedMatch({ model: model, form: form, fetchedAt: Date.now() })
+
+  let next = normalizeNextMatch(scheduledMatches[0])
+  if (!next) {
+    // Keep a still-future cached kickoff when the endpoint returns nothing.
+    const cached = loadCachedMatch()
+    if (cached && cached.next && cached.next.kickoff &&
+        new Date(cached.next.kickoff).getTime() > Date.now()) {
+      next = cached.next
+    }
+  }
+
+  if (model || next) {
+    saveCachedMatch({ model: model, form: form, next: next, fetchedAt: Date.now() })
+  }
 
   return {
     model: model,
     form: form,
-    authFailed: lastResult.authFailed || liveResult.authFailed
+    next: next,
+    authFailed: lastResult.authFailed || liveResult.authFailed || nextResult.authFailed
   }
 }
 
@@ -350,36 +414,55 @@ function styledLabel(parent, text, font, color) {
   return label
 }
 
-function addTeamSide(parent, team, crestImage) {
+function glassPanel(widget, paddingTop, paddingLeading, paddingBottom, paddingTrailing) {
+  const panel = widget.addStack()
+  panel.layoutHorizontally()
+  panel.centerAlignContent()
+  panel.spacing = 6
+  panel.backgroundColor = COLOR_PANEL
+  panel.cornerRadius = 14
+  panel.setPadding(paddingTop, paddingLeading, paddingBottom, paddingTrailing)
+  return panel
+}
+
+function addTeamBadge(parent, team, crestImage) {
   const side = parent.addStack()
   side.layoutVertically()
   side.centerAlignContent()
-  side.spacing = 4
+  side.spacing = 3
 
   const badge = side.addImage(crestImage || initialsImage(team ? team.code : '?'))
   badge.imageSize = new Size(40, 40)
   badge.resizable = true
-  badge.cornerRadius = 6
+  badge.cornerRadius = 8
 
-  styledLabel(side, abbreviation(team), Font.semiboldSystemFont(12), Color.white())
+  styledLabel(side, abbreviation(team), Font.semiboldSystemFont(11), Color.white())
   return side
 }
 
-function addFormRow(widget, form) {
-  const row = widget.addStack()
-  row.layoutHorizontally()
-  row.centerAlignContent()
-  row.spacing = 5
+function addCountdown(parent, kickoff) {
+  if (!kickoff) {
+    styledLabel(parent, 'Kickoff TBD', Font.regularSystemFont(10), COLOR_MUTED)
+    return
+  }
+  const date = new Date(kickoff)
+  if (isNaN(date.getTime()) || date.getTime() <= Date.now()) {
+    styledLabel(parent, 'Kickoff TBD', Font.regularSystemFont(10), COLOR_MUTED)
+    return
+  }
+  // WidgetDate updates itself periodically — no widget rerun required.
+  const countdown = parent.addDate(date)
+  countdown.applyRelativeStyle()
+  countdown.font = Font.regularSystemFont(10)
+  countdown.textColor = COLOR_MUTED
+}
 
-  row.addSpacer(null)
-  styledLabel(row, 'FORM', Font.regularSystemFont(9), COLOR_MUTED)
-  row.addSpacer(4)
-
+function addFormBlocks(parent, form) {
   const results = (form && form.length) ? form : ['D', 'D', 'D', 'D', 'D']
   for (let i = 0; i < results.length; i++) {
     const result = results[i]
-    const box = row.addStack()
-    box.size = new Size(16, 16)
+    const box = parent.addStack()
+    box.size = new Size(15, 15)
     box.cornerRadius = 3
     box.backgroundColor = FORM_COLORS[result] || FORM_COLORS.D
     box.centerAlignContent()
@@ -387,17 +470,38 @@ function addFormRow(widget, form) {
     styledLabel(box, result, Font.boldSystemFont(9), Color.white())
     box.addSpacer(null)
   }
-  row.addSpacer(null)
 }
 
-function buildWidget(model, homeImage, awayImage) {
+function refreshDateFor(model) {
+  let delay = CACHE_TTL_MS
+  if (model.next && model.next.kickoff) {
+    const kickoff = new Date(model.next.kickoff).getTime()
+    if (!isNaN(kickoff) && kickoff > Date.now() && kickoff - Date.now() < delay) {
+      delay = kickoff - Date.now() + 60 * 1000
+    }
+  }
+  return new Date(Date.now() + delay)
+}
+
+function buildWidget(model, nextHomeImage, nextAwayImage) {
   const widget = new ListWidget()
   widget.backgroundColor = COLOR_BG
   widget.setPadding(15, 15, 15, 15)
   widget.spacing = 0                     // vertical rhythm comes from explicit spacers
-  widget.refreshAfterDate = new Date(Date.now() + CACHE_TTL_MS)
+  widget.refreshAfterDate = refreshDateFor(model)
 
-  // Header: club name on the left, data-state hint on the right.
+  // Glass-like sheen: translucent dark gradient plus a faint white highlight.
+  const glass = new LinearGradient()
+  glass.colors = [new Color('#2a2a31', 0.70), new Color('#101014', 0.58)]
+  glass.locations = [0, 1]
+  glass.startPoint = new Point(0, 0)
+  glass.endPoint = new Point(1, 1)
+  widget.backgroundGradient = glass
+
+  const sheen = widget.addStack()
+  sheen.size = new Size(0, 1)
+  sheen.backgroundColor = COLOR_SHEEN
+
   const header = widget.addStack()
   header.layoutHorizontally()
   header.centerAlignContent()
@@ -405,12 +509,12 @@ function buildWidget(model, homeImage, awayImage) {
   header.addSpacer(null)
   styledLabel(header, model.hint || '', Font.regularSystemFont(9), COLOR_MUTED)
 
-  widget.addSpacer(6)
+  widget.addSpacer(3)
 
-  if (!model.home || !model.away) {
+  if (!model.last && !model.next) {
     // Explicit empty state — never render a blank widget.
     const badge = widget.addImage(initialsImage('RMA'))
-    badge.imageSize = new Size(48, 48)
+    badge.imageSize = new Size(40, 40)
     badge.resizable = true
     badge.cornerRadius = 8
     widget.addSpacer(4)
@@ -421,31 +525,55 @@ function buildWidget(model, homeImage, awayImage) {
     return widget
   }
 
-  // Scoreline row: [home crest/abbr] [flex] [score/status] [flex] [away abbr/crest]
-  const row = widget.addStack()
-  row.layoutHorizontally()
-  row.centerAlignContent()
-  row.spacing = 6
+  // TOP ROW — next fixture -------------------------------------------------
+  if (model.next) {
+    const top = glassPanel(widget, 4, 9, 4, 9)
+    addTeamBadge(top, model.next.home, nextHomeImage)
+    top.addSpacer(null)
 
-  addTeamSide(row, model.home, homeImage)
-  row.addSpacer(null)
+    const center = top.addStack()
+    center.layoutVertically()
+    center.centerAlignContent()
+    center.spacing = 1
+    styledLabel(center, 'NEXT', Font.semiboldSystemFont(9), COLOR_GOLD)
+    const prefix = model.next.isHome ? 'vs ' : 'at '
+    styledLabel(center, prefix + abbreviation(model.next.opponent),
+      Font.boldSystemFont(15), Color.white())
+    addCountdown(center, model.next.kickoff)
 
-  const center = row.addStack()
-  center.layoutVertically()
-  center.centerAlignContent()
-  center.spacing = 1
-  const score = styledLabel(center, model.score, Font.boldSystemFont(32), Color.white())
-  score.minimumScaleFactor = 0.7
-  styledLabel(center, model.status, Font.semiboldSystemFont(12), COLOR_GOLD)
-  if (model.isLive) {
-    styledLabel(center, 'LIVE', Font.regularSystemFont(8), COLOR_MUTED)
+    top.addSpacer(null)
+    addTeamBadge(top, model.next.away, nextAwayImage)
+  } else {
+    const top = glassPanel(widget, 8, 10, 8, 10)
+    styledLabel(top, 'NEXT', Font.semiboldSystemFont(9), COLOR_GOLD)
+    top.addSpacer(null)
+    styledLabel(top, 'No fixture scheduled', Font.regularSystemFont(12), Color.white())
   }
 
-  row.addSpacer(null)
-  addTeamSide(row, model.away, awayImage)
+  widget.addSpacer(4)
 
-  widget.addSpacer(8)
-  addFormRow(widget, model.form)
+  // BOTTOM ROW — last result + form ---------------------------------------
+  const bottom = glassPanel(widget, 4, 9, 4, 9)
+  const last = bottom.addStack()
+  last.layoutVertically()
+  last.spacing = 1
+  styledLabel(last, 'LAST', Font.semiboldSystemFont(9), COLOR_GOLD)
+  const resultLine = last.addStack()
+  resultLine.layoutHorizontally()
+  resultLine.spacing = 5
+  const scoreText = styledLabel(resultLine, model.last ? model.last.score : '–',
+    Font.boldSystemFont(17), Color.white())
+  scoreText.minimumScaleFactor = 0.7
+  styledLabel(resultLine, model.last ? model.last.status : '',
+    Font.semiboldSystemFont(10), COLOR_GOLD)
+
+  bottom.addSpacer(null)
+  const formGroup = bottom.addStack()
+  formGroup.layoutHorizontally()
+  formGroup.centerAlignContent()
+  formGroup.spacing = 4
+  styledLabel(formGroup, 'FORM', Font.regularSystemFont(8), COLOR_MUTED)
+  addFormBlocks(formGroup, model.form)
   return widget
 }
 
@@ -454,13 +582,17 @@ function buildWidget(model, homeImage, awayImage) {
 // ---------------------------------------------------------------------------
 
 function renderModelFrom(payload, source, hint, empty) {
-  const model = payload && payload.model ? payload.model : null
+  const last = payload && payload.model ? payload.model : null
+  const next = payload && payload.next ? payload.next : null
   return {
-    home: model ? model.home : null,
-    away: model ? model.away : null,
-    score: model ? model.score : '–',
-    status: model ? model.status : '',
-    isLive: model ? !!model.isLive : false,
+    // Legacy flat fields are kept for cache/test compatibility.
+    home: last ? last.home : null,
+    away: last ? last.away : null,
+    score: last ? last.score : '–',
+    status: last ? last.status : '',
+    isLive: last ? !!last.isLive : false,
+    last: last,
+    next: next,
     form: payload && payload.form ? payload.form : [],
     hint: hint,
     source: source,
@@ -481,9 +613,9 @@ async function resolveModel() {
   if (apiKey) {
     fresh = await fetchMatchData(apiKey)
     needsSetup = fresh.authFailed
-    if (fresh.model) {
+    if (fresh.model || fresh.next) {
       const hint = needsSetup ? 'Set API token'
-        : fresh.model.isLive ? 'Live'
+        : fresh.model && fresh.model.isLive ? 'Live'
         : 'Matchday'
       return renderModelFrom(fresh, 'live', hint, false)
     }
@@ -495,18 +627,18 @@ async function resolveModel() {
       needsSetup ? 'Set API token' : 'Last match', false)
   }
 
-  const sample = renderModelFrom({ model: SAMPLE_MODEL, form: SAMPLE_MODEL.form },
-    'sample', needsSetup ? 'Set API token' : 'Sample data', false)
+  const sample = renderModelFrom(samplePayload(), 'sample',
+    needsSetup ? 'Set API token' : 'Sample data', false)
   return sample
 }
 
 async function run() {
   const model = await resolveModel()
 
-  const homeImage = model.empty ? null : await loadCrest(model.home)
-  const awayImage = model.empty ? null : await loadCrest(model.away)
+  const nextHomeImage = model.next ? await loadCrest(model.next.home) : null
+  const nextAwayImage = model.next ? await loadCrest(model.next.away) : null
 
-  const widget = buildWidget(model, homeImage, awayImage)
+  const widget = buildWidget(model, nextHomeImage, nextAwayImage)
   Script.setWidget(widget)
 
   // Preview during development / when run manually in the app.
@@ -522,8 +654,8 @@ async function run() {
     console.error('Club Hub failed: ' + e)
     try {
       Script.setWidget(buildWidget({
-        home: null,
-        away: null,
+        last: null,
+        next: null,
         status: 'Widget unavailable',
         hint: 'Check the Scriptable log',
         form: []

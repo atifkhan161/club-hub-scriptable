@@ -93,6 +93,9 @@ function makeEl(kind, text) {
     size: null,
     cornerRadius: 0,
     backgroundColor: null,
+    backgroundGradient: null,
+    date: null,
+    style: null,
     image: null,
     imageSize: null,
     resizable: true,
@@ -114,6 +117,11 @@ function makeEl(kind, text) {
   node.leftAlignText = node.centerAlignText = node.rightAlignText = () => node
   node.leftAlignImage = node.centerAlignImage = node.rightAlignImage = () => node
   node.applyFittingContentMode = node.applyFillingContentMode = () => node
+  node.applyRelativeStyle = () => { node.style = 'relative'; return node }
+  node.applyTimerStyle = () => { node.style = 'timer'; return node }
+  node.applyOffsetStyle = () => { node.style = 'offset'; return node }
+  node.applyDateStyle = () => { node.style = 'date'; return node }
+  node.applyTimeStyle = () => { node.style = 'time'; return node }
   return node
 }
 
@@ -152,6 +160,9 @@ FONT_FACTORIES.forEach(name => { Font[name] = size => new Font(name, size) })
   Font[name] = () => new Font(name, null)
 })
 
+class LinearGradient {
+  constructor() { this.colors = []; this.locations = []; this.startPoint = null; this.endPoint = null }
+}
 class Size { constructor(width, height) { this.width = width; this.height = height } }
 class Point { constructor(x, y) { this.x = x; this.y = y } }
 class Rect {
@@ -259,7 +270,7 @@ const vmConsole = {
 }
 
 const context = {
-  Color, Font, Size, Point, Rect, Path, DrawContext, Image,
+  Color, Font, Size, Point, Rect, Path, DrawContext, Image, LinearGradient,
   ListWidget, WidgetStack, Request, FileManager, Keychain, Alert,
   Script, config: {
     runsInApp: false,
@@ -312,37 +323,50 @@ function findNodes() {
   return {
     nodes,
     texts,
-    score: texts.find(n => n.font && n.font.size === 32),
-    status: goldTexts.find(n => STATUS_RE.test(n.text)) || goldTexts[0],
+    score: texts.find(n => n.font && n.font.size === 17),
+    status: goldTexts.find(n => STATUS_RE.test(n.text)),
     form: texts.filter(n => n.font && n.font.size === 9 && ['W', 'D', 'L'].includes(n.text)),
-    codes: texts.filter(n => n.font && n.font.size === 12 &&
+    codes: texts.filter(n => n.font && n.font.size === 11 &&
       n.font.name === 'semiboldSystemFont' && n.textColor && n.textColor.hex === '#ffffff'),
     badges: nodes.filter(n => n.kind === 'image' && n.imageSize &&
       n.imageSize.width === 40 && n.imageSize.height === 40),
-    hint: texts.find(n => HINTS.includes(n.text))
+    hint: texts.find(n => HINTS.includes(n.text)),
+    dates: nodes.filter(n => n.kind === 'date'),
+    nextLabel: texts.find(n => n.text === 'NEXT'),
+    lastLabel: texts.find(n => n.text === 'LAST'),
+    opponent: texts.find(n => n.font && n.font.size === 15)
   }
 }
 
 function assertInvariants() {
   const results = []
   const check = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail || '' })
-  const { nodes, score, status, form, codes, badges, hint } = findNodes()
+  const found = findNodes()
+  const { score, status, form, codes, badges, hint, dates, nextLabel, lastLabel, opponent } = found
   const imageRequests = recorded.filter(r => r.kind === 'image')
   const apiRequests = recorded.filter(r => r.kind === 'json').map(r => r.url)
+  const countdown = dates.find(n => n.style === 'relative') ||
+    found.texts.find(n => n.text === 'Kickoff TBD')
 
   check('widget was rendered', setWidgetCalls === 1, `setWidget calls: ${setWidgetCalls}`)
   check('script completed', completeCalls === 1, `complete calls: ${completeCalls}`)
-  check('background is #1a1a1a', capturedWidget && capturedWidget.backgroundColor &&
-    capturedWidget.backgroundColor.hex === '#1a1a1a')
+  check('translucent #1a1a1a background', capturedWidget && capturedWidget.backgroundColor &&
+    capturedWidget.backgroundColor.hex === '#1a1a1a' &&
+    capturedWidget.backgroundColor.alpha > 0 && capturedWidget.backgroundColor.alpha < 1)
+  check('glass gradient present', capturedWidget && capturedWidget.backgroundGradient &&
+    capturedWidget.backgroundGradient.colors.length === 2)
   check('padding is (15,15,15,15)', capturedWidget &&
     JSON.stringify(capturedWidget.padding) === JSON.stringify([15, 15, 15, 15]))
   check('refreshAfterDate is set', capturedWidget && capturedWidget.refreshAfterDate instanceof Date)
-  check('score is present', !!score && /^(\d+\s-\s\d+|–)$/.test(score.text), score && score.text)
+  check('last score is present', !!score && /^(\d+\s-\s\d+|–)$/.test(score.text), score && score.text)
   check('status is valid', !!status && STATUS_RE.test(status.text), status && status.text)
   check('two 40x40 crests', badges.length === 2, `found ${badges.length}`)
   check('two team codes', codes.length === 2, codes.map(n => n.text).join(', '))
   check('five form squares', form.length === 5 && form.every(n => ['W', 'D', 'L'].includes(n.text)), form.map(n => n.text).join(''))
   check('data-state hint present', !!hint, hint && hint.text)
+  check('NEXT row present', !!nextLabel && !!opponent, opponent && opponent.text)
+  check('LAST row present', !!lastLabel)
+  check('relative countdown present', !!countdown, countdown && (countdown.style || countdown.text))
   check('no SVG crest URLs requested', imageRequests.every(r => !r.url.includes('.svg')),
     imageRequests.map(r => r.url).join(', '))
 
@@ -353,9 +377,9 @@ function assertInvariants() {
     check('api-error falls back to sample', hint && hint.text === 'Sample data', hint && hint.text)
   }
   if (!scenario.noKey && !scenario.apiError) {
-    check('both API endpoints were called',
-      apiRequests.some(u => u.includes('status=FINISHED')) &&
-      apiRequests.some(u => u.includes('status=LIVE')),
+    check('all three API endpoints were called',
+      ['status=FINISHED', 'status=LIVE', 'status=SCHEDULED'].every(part =>
+        apiRequests.some(u => u.includes(part))),
       apiRequests.join(', '))
   }
   return results
@@ -373,7 +397,33 @@ function esc(value) {
 
 function cssColor(color) {
   if (!color) return 'transparent'
-  return color.hex === 'transparent' ? 'transparent' : (color.hex || 'transparent')
+  const hex = color.hex || 'transparent'
+  if (hex === 'transparent') return hex
+  if (typeof color.alpha === 'number' && color.alpha < 1 && /^#[0-9a-f]{6}$/i.test(hex)) {
+    return hex + Math.round(color.alpha * 255).toString(16).padStart(2, '0')
+  }
+  return hex
+}
+
+function gradientCss(gradient) {
+  if (!gradient || !gradient.colors || !gradient.colors.length) return ''
+  const stops = gradient.colors.map((color, index) => {
+    const at = gradient.locations && gradient.locations[index] !== undefined
+      ? gradient.locations[index] * 100 : index * 100
+    return cssColor(color) + ' ' + at + '%'
+  }).join(', ')
+  return `linear-gradient(135deg, ${stops})`
+}
+
+function relativeLabel(node) {
+  const date = node.date ? new Date(node.date) : null
+  if (!date || isNaN(date.getTime())) return 'Kickoff TBD'
+  const minutes = Math.max(0, Math.round((date.getTime() - Date.now()) / 60000))
+  const days = Math.floor(minutes / 1440)
+  const hours = Math.floor((minutes % 1440) / 60)
+  if (days > 0) return `${days} day${days === 1 ? '' : 's'}, ${hours} hour${hours === 1 ? '' : 's'}`
+  if (hours > 0) return `${hours} hour${hours === 1 ? '' : 's'}, ${minutes % 60} minutes`
+  return `${minutes} minutes`
 }
 
 function fontCss(font) {
@@ -389,7 +439,8 @@ function renderNode(node) {
   const children = (node.children || []).map(renderNode).join('')
   if (node.kind === 'widget') {
     const p = node.padding || [0, 0, 0, 0]
-    return `<div class="widget" style="width:322px;height:148px;box-sizing:border-box;display:flex;flex-direction:column;gap:${node.spacing || 0}px;padding:${p.map(x => x + 'px').join(' ')};background:${cssColor(node.backgroundColor)};border-radius:16px;overflow:hidden;">${children}</div>`
+    const background = gradientCss(node.backgroundGradient) || cssColor(node.backgroundColor)
+    return `<div class="widget" style="width:322px;height:148px;box-sizing:border-box;display:flex;flex-direction:column;gap:${node.spacing || 0}px;padding:${p.map(x => x + 'px').join(' ')};background:${background};border:1px solid rgba(255,255,255,0.10);border-radius:16px;overflow:hidden;">${children}</div>`
   }
   if (node.kind === 'stack') {
     const direction = node.axis === 'v' ? 'column' : 'row'
@@ -400,7 +451,9 @@ function renderNode(node) {
     if (node.size) {
       extra += `width:${node.size.width}px;height:${node.size.height}px;flex:none;`
     }
-    if (node.backgroundColor) extra += `background:${cssColor(node.backgroundColor)};`
+    const panelBackground = gradientCss(node.backgroundGradient) ||
+      (node.backgroundColor ? cssColor(node.backgroundColor) : '')
+    if (panelBackground) extra += `background:${panelBackground};`
     if (node.cornerRadius) extra += `border-radius:${node.cornerRadius}px;`
     return `<div style="display:flex;flex-direction:${direction};align-items:${align};gap:${node.spacing || 0}px;${extra}">${children}</div>`
   }
@@ -409,6 +462,9 @@ function renderNode(node) {
       ? 'flex:1 1 0;min-width:1px;min-height:1px;'
       : `width:${node.length}px;height:${node.length}px;flex:none;`
     return `<div style="${style}"></div>`
+  }
+  if (node.kind === 'date') {
+    return `<div style="${fontCss(node.font)}color:${cssColor(node.textColor)};opacity:${node.textOpacity};white-space:nowrap;line-height:1.15;">${esc(relativeLabel(node))}</div>`
   }
   if (node.kind === 'text') {
     return `<div style="${fontCss(node.font)}color:${cssColor(node.textColor)};opacity:${node.textOpacity};white-space:nowrap;line-height:1.15;">${esc(node.text)}</div>`
@@ -455,7 +511,9 @@ async function main() {
   console.log('Widget tree:')
   if (capturedWidget) {
     const walk = (node, depth) => {
-      const label = node.text !== undefined ? ` text=${JSON.stringify(node.text)}` : ''
+      const label = node.kind === 'date'
+        ? ` style=${node.style} ${relativeLabel(node)}`
+        : node.text !== undefined ? ` text=${JSON.stringify(node.text)}` : ''
       console.log('  '.repeat(depth) + node.kind + (node.axis !== 'h' ? `[${node.axis}]` : '') + label)
       ;(node.children || []).forEach(child => walk(child, depth + 1))
     }
@@ -475,8 +533,11 @@ async function main() {
   if (scenario.json) {
     const found = findNodes()
     console.log('\nRendered model:')
+    const countdownNode = found.dates.find(n => n.style === 'relative')
     console.log(JSON.stringify({
-      score: found.score && found.score.text,
+      next: found.opponent && found.opponent.text,
+      countdown: countdownNode ? relativeLabel(countdownNode) : null,
+      lastScore: found.score && found.score.text,
       status: found.status && found.status.text,
       hint: found.hint && found.hint.text,
       form: found.form.map(n => n.text),

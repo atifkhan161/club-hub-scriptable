@@ -1,18 +1,17 @@
 # Club Hub
 
-A dark-themed, medium-size [Scriptable](https://scriptable.app) home-screen widget for Real Madrid fans. It shows the latest scoreline, both team crests, match status, and the club's last five results at a glance.
+A dark-themed, medium-size [Scriptable](https://scriptable.app) home-screen widget for Real Madrid fans. Two rows give you the next fixture with a live relative countdown on top, and the last result plus the club's recent form below.
 
 Built with plain JavaScript (ES6+) for iOS/iPadOS/macOS via Scriptable. No build step, package manager, or dependencies.
 
 ## Features
 
-- **Scoreline** — centered, prominent score with the match status directly below (`67'`, `HT`, `FT`).
-- **Team crests** — 40×40 PNG crests with a 3-letter initials fallback when an image fails to load.
-- **Recent form** — five W/D/L blocks in green/gray/red.
-- **Dynamic home/away** — Real Madrid is placed on whichever side the API reports.
-- **Dark theme** — `#1a1a1a` background, `#f1d382` gold accents, system fonts.
-- **Resilient** — fresh API data → cached last match → bundled sample data → clean "no fixture" state. Never a blank widget.
-- **Offline-friendly caching** — match JSON and crest images are cached with `FileManager`; `refreshAfterDate` respects API rate limits.
+- **Next match row** — both 40×40 crests, opponent code (`vs`/`at`), and an auto-updating `WidgetDate` relative countdown like "2 days, 6 hours".
+- **Last match row** — latest score and status (`67'`, `HT`, `FT`) beside five W/D/L form blocks in green/gray/red.
+- **Dynamic home/away** — Real Madrid is placed on whichever side the API reports for both rows.
+- **Glass-style theme** — translucent `#1a1a1a` base, soft diagonal gradient, rounded panels and `#f1d382` gold accents. On iOS 26 the system supplies its own Liquid Glass in clear/tinted Home Screen modes; Scriptable cannot invoke that effect directly, so this is an approximation designed to stay legible over any wallpaper.
+- **Resilient** — fresh API data → cached match/next fixture → bundled sample data → clean "No fixture scheduled" state. Never a blank widget.
+- **Offline-friendly caching** — match JSON and crest images are cached with `FileManager`; `refreshAfterDate` respects API rate limits and refreshes just after the next kickoff when it is sooner.
 
 ## Requirements
 
@@ -29,7 +28,9 @@ Built with plain JavaScript (ES6+) for iOS/iPadOS/macOS via Scriptable. No build
 
 Running the script in the app automatically shows a medium widget preview (`presentMedium()`). Tap the widget parameter field only if you want to distinguish multiple widget instances; V1 ignores it.
 
-> **Free-tier note:** football-data.org's free plan delivers delayed scores and usually no live minute. With a free token the widget typically shows the latest finished match (or a generic `LIVE` marker). A live-scores plan is needed for minute-by-minute updates. The free tier is limited to 10 calls/minute; this widget's 30-minute refresh stays well within that.
+> **Free-tier note:** football-data.org's free plan delivers delayed scores and usually no live minute. With a free token the widget typically shows the latest finished match (or a generic `LIVE` marker). A live-scores plan is needed for minute-by-minute updates. The free tier is limited to 10 calls/minute; this widget makes three requests per 30-minute refresh (finished, live, scheduled), well within that limit.
+
+> **iOS 26 appearance:** choose a clear or tinted Home Screen look to let the system apply Liquid Glass around the widget. The widget itself uses translucent fills and a gradient so content remains readable in both light and dark appearances; accessibility settings that reduce transparency may change the look.
 
 ## Local testing
 
@@ -37,7 +38,7 @@ A zero-dependency Node harness runs the real `index.js` in a simulated Scriptabl
 
 ```sh
 export FOOTBALL_DATA_TOKEN=...        # football-data.org token; never logged
-node tools/widget-lab.js              # live data + 13 assertions + preview
+node tools/widget-lab.js              # live data + 17 assertions + preview
 node tools/widget-lab.js --json       # also print the rendered model
 node tools/widget-lab.js --no-key     # missing-token fallback (no token needed)
 node tools/widget-lab.js --api-error  # API failure fallback
