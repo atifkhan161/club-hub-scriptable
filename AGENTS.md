@@ -52,6 +52,13 @@ The skill is derived from the complete official docs at
 - The medium widget has two rows: next fixture (`status=SCHEDULED&limit=1`) with
   a `WidgetDate.applyRelativeStyle()` countdown, and last result plus form.
   Keep cached payloads backward compatible — old files may lack `next`.
+- football-data.org returns team matches **oldest first**. Never take
+  `matches[0]` as "last match": request FINISHED within a bounded `dateFrom`
+  window, filter to matches involving `TEAM_ID`, sort by `utcDate` descending,
+  and derive the form from the five newest. For SCHEDULED, pick the earliest
+  future kickoff. Reject cached/API matches not involving `TEAM_ID` (a stale
+  cache can come from an older build). Regression checks:
+  `tools/widget-lab.js --fixture-order` and `--bad-cache`.
 - Follow the PRD's design tokens: translucent `#1a1a1a` background, `#f1d382`
   gold accents, form colors `#2ecc71` / `#95a5a6` / `#e74c3c`. The "glass" look
   is only approximated with translucent panels and a gradient; Scriptable has

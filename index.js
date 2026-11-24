@@ -137,6 +137,14 @@ function loadCachedMatch() {
     if (!FileManager.local().fileExists(path)) return null
     const parsed = JSON.parse(FileManager.local().readString(path))
     if (!parsed || !parsed.model || !parsed.model.home) return null
+    const home = parsed.model.home
+    const away = parsed.model.away || {}
+    // Defend against a stale cache written by an older/buggy build that
+    // captured a match not involving Real Madrid.
+    if (home.id && away.id && home.id !== TEAM_ID && away.id !== TEAM_ID) {
+      console.warn('Ignoring match cache for a different club')
+      return null
+    }
     return parsed
   } catch (e) {
     console.warn('Could not read match cache: ' + e)
@@ -305,7 +313,7 @@ function deriveForm(matches, teamId) {
     return String(match.status || '').toUpperCase() === 'FINISHED'
   }).slice(0, 5)
 
-  // The API returns most-recent-first; the PRD wants oldest -> newest.
+  // fetchMatchData sorts newest-first; the PRD wants oldest -> newest.
   return finished.reverse().map(function (match) {
     const fullTime = (match.score && match.score.fullTime) || {}
     const homeGoals = fullTime.home
@@ -322,20 +330,51 @@ function deriveForm(matches, teamId) {
   })
 }
 
+function dateDaysAgo(days) {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+}
+
+// football-data.org returns a team's matches in ascending date order, so
+// matches[0] is the OLDEST item in the window. Always sort ourselves.
+function sortedMatches(collection) {
+  const matches = (collection && collection.matches) || []
+  const relevant = matches.filter(function (match) {
+    return !!(match && match.homeTeam && match.awayTeam &&
+      (match.homeTeam.id === TEAM_ID || match.awayTeam.id === TEAM_ID))
+  })
+  if (relevant.length !== matches.length) {
+    console.warn('Ignored ' + (matches.length - relevant.length) +
+      ' match(es) not involving team ' + TEAM_ID)
+  }
+  return relevant.sort(function (a, b) {
+    const ad = new Date(a.utcDate || 0).getTime()
+    const bd = new Date(b.utcDate || 0).getTime()
+    return bd - ad // newest first
+  })
+}
+
 async function fetchMatchData(apiKey) {
-  const lastResult = await safeFetch('/teams/' + TEAM_ID + '/matches?status=FINISHED&limit=5', apiKey)
+  const lastResult = await safeFetch(
+    '/teams/' + TEAM_ID + '/matches?status=FINISHED&dateFrom=' + dateDaysAgo(120) + '&limit=50',
+    apiKey)
   const liveResult = await safeFetch('/teams/' + TEAM_ID + '/matches?status=LIVE&limit=1', apiKey)
   const nextResult = await safeFetch('/teams/' + TEAM_ID + '/matches?status=SCHEDULED&limit=1', apiKey)
 
-  const finishedMatches = (lastResult.json && lastResult.json.matches) || []
-  const liveMatches = (liveResult.json && liveResult.json.matches) || []
-  const scheduledMatches = (nextResult.json && nextResult.json.matches) || []
+  const finishedMatches = sortedMatches(lastResult.json)
+  const liveMatches = sortedMatches(liveResult.json)
+  const scheduledMatches = sortedMatches(nextResult.json)
   const form = finishedMatches.length ? deriveForm(finishedMatches, TEAM_ID) : []
 
   const chosen = liveMatches[0] || finishedMatches[0] || null
   const model = chosen ? normalizeMatch(chosen) : null
 
-  let next = normalizeNextMatch(scheduledMatches[0])
+  // Descending list -> the last future item is the soonest kickoff. This also
+  // skips stale SCHEDULED entries whose date has already passed.
+  const upcoming = scheduledMatches.filter(function (match) {
+    const kickoff = new Date(match.utcDate || 0).getTime()
+    return kickoff > Date.now()
+  })
+  let next = normalizeNextMatch(upcoming[upcoming.length - 1])
   if (!next) {
     // Keep a still-future cached kickoff when the endpoint returns nothing.
     const cached = loadCachedMatch()
@@ -363,7 +402,9 @@ async function fetchMatchData(apiKey) {
 
 async function loadCrest(team) {
   if (!team || !team.logo) return null
-  const path = crestCachePath(team.id || 0)
+  // Fall back to the team code so two teams without an id cannot share
+  // crest-0.png and display each other's badge.
+  const path = crestCachePath(team.id || team.code || 'unknown')
   const fm = FileManager.local()
   try {
     const fresh = fm.fileExists(path) &&

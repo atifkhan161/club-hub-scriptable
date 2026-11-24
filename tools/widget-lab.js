@@ -12,6 +12,8 @@
 //   node tools/widget-lab.js --no-key
 //   node tools/widget-lab.js --api-error
 //   node tools/widget-lab.js --crest-fail
+//   node tools/widget-lab.js --fixture-order
+//   node tools/widget-lab.js --bad-cache
 //   node tools/widget-lab.js --json --preview /tmp/preview.html
 //   node tools/widget-lab.js --help
 
@@ -33,6 +35,8 @@ Options:
   --no-key          Simulate a missing Keychain token (fallback widget).
   --api-error       Simulate API request failures (cached/sample fallback).
   --crest-fail      Simulate crest download failures (initials fallback).
+  --fixture-order   Inject matches oldest-first to verify newest-match selection.
+  --bad-cache       Seed a cache for another club; must be ignored on fallback.
   --json            Print the rendered model as JSON.
   --preview <path>  Write the HTML preview to a custom path.
   --help            Show this help.
@@ -47,6 +51,8 @@ const scenario = {
   noKey: argv.includes('--no-key'),
   apiError: argv.includes('--api-error'),
   crestFail: argv.includes('--crest-fail'),
+  fixtureOrder: argv.includes('--fixture-order'),
+  badCache: argv.includes('--bad-cache'),
   json: argv.includes('--json')
 }
 const previewIndex = argv.indexOf('--preview')
@@ -56,7 +62,8 @@ if (previewIndex !== -1 && argv[previewIndex + 1] && !argv[previewIndex + 1].sta
 }
 
 const envToken = process.env.FOOTBALL_DATA_TOKEN
-const token = envToken || (scenario.apiError ? 'SIMULATED_TOKEN' : null)
+const token = envToken ||
+  ((scenario.apiError || scenario.fixtureOrder || scenario.badCache) ? 'SIMULATED_TOKEN' : null)
 if (!token && !scenario.noKey) {
   console.error('FOOTBALL_DATA_TOKEN is not set. Export a football-data.org token,')
   console.error('or use --no-key / --api-error to exercise the fallback states.')
@@ -286,6 +293,70 @@ const context = {
 vm.createContext(context)
 
 // ---------------------------------------------------------------------------
+// Fixture: API data in the order football-data.org actually uses
+// ---------------------------------------------------------------------------
+
+function fixtureTeam(id, name, code) {
+  return { id: id, name: name, shortName: name, tla: code, crest: null }
+}
+
+function fixtureMatch(daysFromNow, home, away, homeGoals, awayGoals, status) {
+  return {
+    utcDate: new Date(Date.now() + daysFromNow * 86400000).toISOString(),
+    status: status || 'FINISHED',
+    homeTeam: home,
+    awayTeam: away,
+    score: { fullTime: { home: homeGoals, away: awayGoals } }
+  }
+}
+
+function installFixtureFetch() {
+  const rma = fixtureTeam(86, 'Real Madrid', 'RMA')
+  const barca = fixtureTeam(81, 'FC Barcelona', 'FCB')
+  const atm = fixtureTeam(548, 'Atlético Madrid', 'ATM')
+  // Oldest first, with the most recent match last — the widget must not
+  // simply take matches[0] from the API response.
+  const finished = [
+    fixtureMatch(-55, rma, fixtureTeam(532, 'Valencia', 'VAL'), 1, 0),
+    fixtureMatch(-48, fixtureTeam(536, 'Sevilla', 'SEV'), rma, 2, 2),
+    fixtureMatch(-40, rma, fixtureTeam(540, 'Getafe', 'GET'), 3, 0),
+    fixtureMatch(-30, fixtureTeam(530, 'Real Betis', 'BET'), rma, 1, 2),
+    fixtureMatch(-12, barca, rma, 4, 1) // newest: FCB 4-1 RMA
+  ]
+  // Later kickoff first; the sooner one must still be selected.
+  const scheduled = [
+    fixtureMatch(10, rma, fixtureTeam(543, 'Real Sociedad', 'RSO'), null, null, 'SCHEDULED'),
+    fixtureMatch(3, atm, rma, null, null, 'SCHEDULED')
+  ]
+  globalThis.fetch = async function (url) {
+    let matches = []
+    if (String(url).includes('status=FINISHED')) matches = finished
+    else if (String(url).includes('status=SCHEDULED')) matches = scheduled
+    return {
+      status: 200,
+      headers: new Map([['content-type', 'application/json']]),
+      json: async () => ({ matches: matches })
+    }
+  }
+}
+
+function installBadCache() {
+  fileStore['/cache/club-hub/match.json'] = JSON.stringify({
+    model: {
+      home: fixtureTeam(81, 'FC Barcelona', 'FCB'),
+      away: fixtureTeam(548, 'Atlético Madrid', 'ATM'),
+      score: '5 - 0',
+      status: 'FT'
+    },
+    form: ['W', 'W', 'W', 'W', 'W'],
+    fetchedAt: Date.now()
+  })
+  globalThis.fetch = async function () {
+    throw new Error('Simulated API failure with a foreign match cached')
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Run the real script
 // ---------------------------------------------------------------------------
 
@@ -390,6 +461,24 @@ function assertInvariants() {
       ['status=FINISHED', 'status=LIVE', 'status=SCHEDULED'].every(part =>
         apiRequests.some(u => u.includes(part))),
       apiRequests.join(', '))
+    check('finished query is bounded to a recent window',
+      apiRequests.some(u => u.includes('status=FINISHED') && u.includes('dateFrom=')),
+      apiRequests.find(u => u.includes('status=FINISHED')) || '')
+  }
+  if (scenario.badCache) {
+    check('foreign cached match is ignored',
+      hint && hint.text === 'Sample data' && score && score.text !== '5 - 0',
+      hint && hint.text)
+  }
+  if (scenario.fixtureOrder) {
+    check('newest finished match is shown', score && score.text === '4 - 1', score && score.text)
+    check('newest finished teams are shown',
+      miniNames.map(n => n.text).join(' vs ') === 'FCB vs RMA',
+      miniNames.map(n => n.text).join(' vs '))
+    check('form is the latest five, oldest to newest',
+      form.map(n => n.text).join('') === 'WDWWL', form.map(n => n.text).join(''))
+    check('soonest scheduled fixture is shown',
+      opponent && opponent.text === 'at ATM', opponent && opponent.text)
   }
   return results
 }
@@ -492,7 +581,9 @@ function renderNode(node) {
 function writePreview(results) {
   const mode = scenario.noKey ? '--no-key'
     : scenario.apiError ? '--api-error'
-    : scenario.crestFail ? '--crest-fail' : 'live'
+    : scenario.crestFail ? '--crest-fail'
+    : scenario.fixtureOrder ? '--fixture-order'
+    : scenario.badCache ? '--bad-cache' : 'live'
   const passed = results.filter(r => r.ok).length
   const total = results.length
   const html = `<!doctype html>
@@ -518,6 +609,8 @@ ${capturedWidget ? renderNode(capturedWidget) : '<div class="caption">No widget 
 // ---------------------------------------------------------------------------
 
 async function main() {
+  if (scenario.fixtureOrder) installFixtureFetch()
+  if (scenario.badCache) installBadCache()
   await runScript()
   const results = assertInvariants()
 

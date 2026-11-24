@@ -42,11 +42,13 @@ A zero-dependency Node harness runs the real `index.js` in a simulated Scriptabl
 
 ```sh
 export FOOTBALL_DATA_TOKEN=...        # football-data.org token; never logged
-node tools/widget-lab.js              # live data + 20 assertions + preview
+node tools/widget-lab.js              # live data + 21 assertions + preview
 node tools/widget-lab.js --json       # also print the rendered model
 node tools/widget-lab.js --no-key     # missing-token fallback (no token needed)
 node tools/widget-lab.js --api-error  # API failure fallback
 node tools/widget-lab.js --crest-fail # initials-badge fallback
+node tools/widget-lab.js --fixture-order # oldest-first API data regression check
+node tools/widget-lab.js --bad-cache     # foreign cached match must be ignored
 node tools/widget-lab.js --help
 ```
 
@@ -59,6 +61,8 @@ To open the generated preview in your browser automatically:
 ```
 
 The preview is written to `.cache/widget-preview.html` (gitignored). It is an approximation for layout sanity checks only — final visual approval must be done with the real widget in Scriptable on macOS/iOS.
+
+`--fixture-order` needs no token: it injects fixture matches in football-data.org's oldest-first order and asserts that the widget still shows the **newest** result, the matching five-match form, and the **soonest** upcoming fixture. football-data.org returns team matches chronologically ascending, so relying on `matches[0]` shows an old match in the last-result row. The widget now bounds the finished-match request to the last 120 days and sorts by `utcDate` itself; it also ignores any API or cached match that does not involve Real Madrid (`--bad-cache` checks the cache path).
 
 ## Repository layout
 
